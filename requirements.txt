@@ -1,0 +1,9 @@
+streamlit
+pdfminer.six
+smtplib
+email-validator
+spacy
+fpdf
+pandas
+matplotlib
+requests
