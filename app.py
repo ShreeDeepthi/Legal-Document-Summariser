@@ -10,8 +10,20 @@ from fpdf import FPDF
 import pandas as pd
 import matplotlib.pyplot as plt
 import requests
+import subprocess
+import sys
 
-# Load spaCy model
+# Install spaCy and download the 'en-core-web-sm' model if not already installed
+try:
+    import spacy
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "spacy"])
+
+try:
+    spacy.load("en_core_web_sm")
+except OSError:
+    subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+
 nlp = spacy.load("en_core_web_sm")
 
 # Predefined risk-related words
@@ -31,7 +43,7 @@ def extract_key_clauses(text):
     doc = nlp(text)
     sentences = list(doc.sents)
     clauses = [str(sentence).strip() for sentence in sentences if len(sentence) > 10]
-    return clauses[:10]  # Return top 10 clauses for simplicity
+    return clauses[:10]
 
 def summarize_text(text, num_sentences=5):
     doc = nlp(text)
@@ -54,7 +66,6 @@ def detect_risks(text):
     return list(set(detected_risks))
 
 def get_regulatory_updates():
-    # Fallback: Pre-defined updates
     predefined_updates = [
         {"title": "New Compliance Guidelines", "summary": "SEC released new guidelines for regulatory compliance."},
         {"title": "Update on Financial Risks", "summary": "New policies to mitigate risks in the financial sector."},
@@ -63,8 +74,7 @@ def get_regulatory_updates():
     try:
         response = requests.get(url, headers=HEADERS)
         response.raise_for_status()
-        updates = []  # Placeholder for parsed updates (needs a proper parsing method)
-        # Process response.content with BeautifulSoup or similar parser if allowed
+        updates = []  
         return updates if updates else predefined_updates
     except requests.exceptions.RequestException:
         return predefined_updates
@@ -77,13 +87,11 @@ def generate_pdf(summary, clauses, risks, updates, pdf_path="Analysis_Results.pd
 
     pdf.cell(200, 10, txt="Legal Document Analysis Results", ln=True, align="C")
 
-    # Summary
     pdf.ln(10)
     pdf.cell(200, 10, txt="Summary", ln=True, align="L")
     pdf.set_font("Arial", size=10)
     pdf.multi_cell(0, 10, summary)
 
-    # Key Clauses
     pdf.ln(10)
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, txt="Key Clauses", ln=True, align="L")
@@ -91,14 +99,12 @@ def generate_pdf(summary, clauses, risks, updates, pdf_path="Analysis_Results.pd
     for clause in clauses:
         pdf.multi_cell(0, 10, f"- {clause}")
 
-    # Risks
     pdf.ln(10)
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, txt="Detected Risks", ln=True, align="L")
     pdf.set_font("Arial", size=10)
     pdf.multi_cell(0, 10, ", ".join(risks))
 
-    # Regulatory Updates
     pdf.ln(10)
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, txt="Regulatory Updates", ln=True, align="L")
@@ -125,28 +131,38 @@ def send_email(pdf_path, recipient_email):
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
 
+def plot_word_frequencies(text):
+    doc = nlp(text)
+    word_frequencies = Counter([token.text.lower() for token in doc if token.is_alpha and not token.is_stop])
+    top_words = word_frequencies.most_common(10)
+    words, frequencies = zip(*top_words)
+    plt.figure(figsize=(10, 5))
+    plt.bar(words, frequencies, color="skyblue")
+    plt.title("Top 10 Word Frequencies")
+    plt.xlabel("Words")
+    plt.ylabel("Frequency")
+    st.pyplot(plt)
+
 def main():
     st.title("Interactive Legal Document Analysis Dashboard")
 
-    # Sidebar options
     st.sidebar.title("Options")
     features = st.sidebar.multiselect("Select Features", 
                                        ["Data Visualization", "Summary", "Key Clauses", "Risk Detection", "Regulatory Updates"])
 
-    # File upload
     uploaded_file = st.file_uploader("Upload a legal document (PDF)", type="pdf")
     recipient_email = st.text_input("Enter your email to receive the analysis results (optional)")
 
-    if uploaded_file is not None:
-        try:
-            text = extract_text_from_pdf(uploaded_file)
-            st.success("Text extracted successfully!")
-        except Exception as e:
-            st.error(f"Error extracting text from PDF: {e}")
-            return
+    if st.button("Submit"):
+        if not recipient_email:
+            st.error("Please enter an email address to receive the analysis.")
+        else:
+            st.success(f"Analysis will be sent to {recipient_email}.")
 
-        summary = ""
-        clauses, risks, updates = [], [], []
+    if uploaded_file is not None:
+        text = extract_text_from_pdf(uploaded_file)
+
+        summary, clauses, risks, updates = "", [], [], []
 
         if "Summary" in features:
             summary = summarize_text(text)
@@ -170,21 +186,20 @@ def main():
             for update in updates:
                 st.write(f"- **{update.get('title')}**: {update.get('summary')}")
 
-        # Generate PDF
-        if st.button("Generate PDF Report"):
-            pdf_path = "Analysis_Results.pdf"
-            generate_pdf(summary, clauses, risks, updates, pdf_path)
-            with open(pdf_path, "rb") as file:
-                st.download_button("Download PDF Report", file, file_name="Analysis_Results.pdf", mime="application/pdf")
+        if "Data Visualization" in features:
+            st.subheader("Word Frequency Visualization")
+            plot_word_frequencies(text)
 
-            # Email PDF
-            if recipient_email:
-                try:
-                    validate_email(recipient_email)
-                    send_email(pdf_path, recipient_email)
-                    st.success(f"PDF sent to {recipient_email} successfully!")
-                except EmailNotValidError:
-                    st.error("Invalid email address. Please enter a valid one.")
+        pdf_path = "Analysis_Results.pdf"
+        generate_pdf(summary, clauses, risks, updates, pdf_path)
+
+        if recipient_email:
+            try:
+                validate_email(recipient_email)
+                send_email(pdf_path, recipient_email)
+                st.success("Analysis PDF has been sent to your email.")
+            except EmailNotValidError:
+                st.error("Invalid email address. Please enter a valid email.")
 
 if __name__ == "__main__":
     main()
